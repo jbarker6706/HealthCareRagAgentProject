@@ -1,0 +1,16 @@
+# Python virtual environments
+.venv/
+venv/
+ENV/
+__pycache__/
+*.pyc
+
+# Local vector database storage folders
+qdrant_storage/
+chroma_storage/
+
+# IDE files
+.idea/
+
+# Large raw dataset files (Optional, skip if you want the CSV on GitHub)
+data/raw/synthetic.csv

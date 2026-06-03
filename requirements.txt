@@ -1,0 +1,8 @@
+pandas
+langchain
+langchain_community
+langchain_core
+langchain_ollama
+langgraph
+chromadb
+psycopg2
