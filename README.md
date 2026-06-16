@@ -1,82 +1,107 @@
-# 🏥 On-Premise Clinical Hybrid RAG Agent & Patient Longitudinal Record System
+# 🏥 On-Premise Clinical Hybrid RAG Agent & Patient Record Architecture (v2.0.0)
 
-An enterprise-grade, 100% local, air-gapped Artificial Intelligence pipeline built to process massive multi-page electronic health records (EHR), unstructured clinical notation logs, and global medical research literature. This system delivers high-utility diagnostic decision support to clinicians via an interactive dashboard while guaranteeing absolute data sovereignty and strict HIPAA privacy boundary enforcement.
+An enterprise-grade, 100% local, air-gapped Artificial Intelligence system engineered to process massive multi-page electronic health records (EHR), unstructured clinical notation logs, and global medical research literature. Completely refactored from a monolithic prototype into a decoupled, production-ready polymorphic architecture, this platform guarantees absolute data sovereignty and strict HIPAA compliance boundaries by executing exclusively on-premise.
 
 ---
 
 ## 🚀 Core Architecture Overview
 
-This production-grade baseline bypasses volatile public cloud APIs and vendor lock-in, executing high-performance inference and dual-vector mathematical indexing entirely on consumer-tier local hardware.
+This decoupled platform routes client interactions through a high-performance web API framework, leveraging state-machine routing loops and an interchangeable data retention layer.
 
 ```text
-       [ Clinician User Query: "Summarize cardiac history" ]
-                                │
-                                ▼
-                  ┌───────────────────────────┐
-                  │    Supervisor Agent       │
-                  │   (LangGraph State)       │
-                  └─────────────┬─────────────┘
-                                │
-         ┌──────────────────────┴──────────────────────┐
-         ▼                                             ▼
-┌────────────────────────┐                    ┌────────────────────────┐
-│   EMR Retrieval RAG    │                    │  Clinical Trial Agent  │
-│  (Qdrant Hybrid DB)    │                    │   (Web Search Tool)    │
-└────────────────────────┘                    └────────────────────────┘
+               [ Clinician User Client Request via HTTP / REST ]
+                                       │
+                                       ▼
+                         ┌───────────────────────────┐
+                         │   FastAPI Gateway Router  │
+                         │     (app/api/routes.py)   │
+                         └─────────────┬─────────────┘
+                                       │
+                                       ▼
+                         ┌───────────────────────────┐
+                         │    Supervisor Agent       │
+                         │  (app/core/agent_graph.py)│
+                         └─────────────┬─────────────┘
+                                       │
+                ┌──────────────────────┴──────────────────────┐
+                ▼                                             ▼
+   ┌────────────────────────┐                    ┌────────────────────────┐
+   │   EMR Retrieval RAG    │                    │  Clinical Trial Agent  │
+   │  (Polymorphic Interface)│                    │   (Web Search Tool)    │
+   └────────────┬───────────┘                    └────────────────────────┘
+                │
+        ┌───────┴───────┐
+        ▼               ▼
+┌──────────────┐┌──────────────┐
+│  Qdrant DB   ││  Chroma DB   │
+│(Hybrid Search)│(Dense Vector)│
+└──────────────┘└──────────────┘
 ```
 
-### 1. The Dense-Sparse Hybrid Retrieval Engine
-To completely eliminate clinical context hallucinations, the system runs an advanced **Hybrid Retrieval Pipeline** inside a local Dockerized **Qdrant** container:
-* **Dense Semantic Vector Search:** Uses `BAAI/bge-small-en-v1.5` (via `FastEmbed`) to calculate deep multi-dimensional mathematical embeddings for complex clinical concepts (e.g., matching "cardiovascular distress" with "myocardial infarction").
-* **Sparse Lexical Keyword Search:** Natively embeds a `Splade_PP_en_v1` matrix weights engine to surface exact lexical terms, specific pharmacological drug titles, and rigid mathematical metrics (e.g., "Metformin 500mg").
-* **Reciprocal Rank Fusion (RRF):** Fuses sparse and dense arrays utilizing Qdrant's universal `FusionQuery` matching engine to yield precise clinical contexts under high density limits.
+### 1. Polymorphic Multi-Backend Vector Core
+The system features an abstract database implementation layer (`app/database/base.py`) that permits switching the underlying hardware storage engine dynamically at boot time via configurations without modifying upstream code components:
+* **Qdrant Hybrid Engine Engine (`qdrant_backend.py`):** Combines dense semantic vectors (`bge-small-en-v1.5`) with sparse lexical tokens (`Splade_PP_en_v1`) processed through Reciprocal Rank Fusion (RRF).
+* **Chroma Semantic Engine (`chroma_backend.py`):** Runs an ultra-lightweight, local, disk-backed persistent semantic document cluster utilizing optimized FastEmbed float extractions.
 
-### 2. Cognitive Multi-Agent Orchestration & State Management
-* **Deterministic Routing Logic:** Built on top of **LangGraph**, the cognitive supervisor agent handles dynamic conversational state tracking using an internal checkpoint memory engine (`MemorySaver`).
-* **Infinite-Loop Prevention:** Ensures predictable, safe agent routing. If critical context files or target patient variables are missing from a query, the agent gracefully falls back rather than entering recursive looping cycles.
-* **Clinical Guardrails (SOAP Block Constraints):** The LLM (`Llama 3.1` via local `Ollama`) is strictly sandboxed via system prompts to compile observations using a standardized medical structure: **S**ubjective, **O**bjective, **A**ssessment, and **P**lan.
+### 2. Context Engineering & Programmatic HIPAA Security
+* **Parent-Child Chunk Partitioning (`text_processor.py`):** Mitigates LLM context window clutter. Documents are split into precise 200-character tokens (children) for vector matching, but link back to 1000-character paragraphs (parents) to supply the LLM with ample diagnostic data.
+* **HIPAA Compliance Redactor (`phi_sanitizer.py`):** A rigid security interception layer that applies compiled regular expressions to strip out Protected Health Information (PHI) like SSNs, Medical Record Numbers (MRN), phone numbers, and emails before ingestion.
 
 ---
 
-## 🛠️ Technical Stack (Local Open-Source Layout)
+## 🛠️ Modular Directory Layout
 
-* **Orchestration Layer:** LangGraph Engine (LangChain v1.0+ Ecosystem)
-* **Local Inference Server:** Ollama (Executing quantized `Llama 3.1 8B`)
-* **Vector Database:** Qdrant Server (Background Detached Docker Container)
-* **Embedding Accelerators:** FastEmbed (`bge-small-en-v1.5` + `Splade_PP_en_v1`)
-* **Data Processing Layer:** Pandas DataFrames & NumPy Array Matrix Extensions
-* **User Interface Engine:** Gradio Live Interactive Component Server
+```text
+HealthCareRagAgentProject/
+│
+├── data/raw/synthetic.csv          # Local EHR patient text rows (Git-ignored)
+├── app/
+│   ├── __init__.py                 # Namespace declaration package
+│   ├── config.py                   # Centralized Pydantic application parameters
+│   ├── api/
+│   │   ├── __init__.py
+│   │   └── routes.py               # FastAPI high-performance query endpoints
+│   ├── core/
+│   │   ├── __init__.py
+│   │   ├── phi_sanitizer.py        # Regex HIPAA security interceptor
+│   │   ├── text_processor.py       # Sliding-window parent-child chunk engine
+│   │   └── agent_graph.py          # LangGraph Supervisor multi-agent core
+│   └── database/
+│       ├── __init__.py             # Dynamic get_vector_db factory resolver
+│       ├── base.py                 # Abstract Polymorphic Base Interface Class
+│       ├── qdrant_backend.py       # Sparse/Dense hybrid search implementation
+│       └── chroma_backend.py       # Disk-persistent dense matching engine
+│
+├── main.py                         # Unified system gateway startup script
+├── test_rag.py                     # Isolation and infrastructure test harness
+└── README.md                       # Professional portfolio documentation
+```
 
 ---
 
 ## ⚡ Technical Talking Points for Recruiters
 
-* **Absolute Data Sovereignty:** "The system is engineered to function 100% within on-premise, air-gapped infrastructure. Zero bit-streams cross external network networks, eliminating public cloud leakage vulnerabilities and matching strict enterprise HIPAA compliance protocols."
-* **Elimination of Variable API Costs:** "By orchestrating complex multi-agent routing steps and chunk ingest loops over local open-source LLM runtimes, the network achieves predictable, zero-token operating costs."
-* **Hallucination Mitigation by Strict Citing:** "The retrieval module intercepts generic LLM generations by hard-binding exact database primary keys, mapping the specific Patient Note ID and timestamp directly into the analytical window."
+* **Decoupled Interface-Driven Design:** "I engineered the data layer around an abstract class layout. This polymorphism allows enterprise systems to switch their data persistence store from a lightweight cluster like Chroma to an advanced hybrid store like Qdrant instantly via configuration strings."
+* **Data Sovereignty & Zero Variable Costs:** "This architecture runs 100% locally. Zero bytes of sensitive data leave the infrastructure boundaries, aligning with strict HIPAA guardrails and avoiding volatile API token pricing networks."
+* **Advanced Context Engineering:** "By splitting documents into minor children shards for crisp mathematical matching while passing parent paragraphs to the local `Llama 3.1` model, the system maintains high recall while eliminating hallucinations."
 
 ---
 
-## 🏁 Installation & Quickstart (Local Evaluation)
+## 🏁 Verification & Subsystem Execution
 
-### 1. Spin up the Background Vector Store (Docker)
-Launch the persistent database container mapping physical file directories to your local machine:
+### 1. Run the Isolation Test Harness
+Validate either vector store engine instantly by calling the test runner tool with inline variables:
 ```bash
-docker run -d -p 6333:6333 -p 6334:6334 \
-  -v \$(pwd)/qdrant_storage:/qdrant/storage \
-  --name local-qdrant \
-  qdrant/qdrant
+# Evaluate Qdrant hybrid extraction
+VECTOR_DB_BACKEND=qdrant PYTHONPATH=. python test_rag.py
+
+# Evaluate Chroma dense persistence mapping
+VECTOR_DB_BACKEND=chroma PYTHONPATH=. python test_rag.py
 ```
 
-### 2. Verify Your Local Models Are Available
-Ensure your local Ollama engine is active and serving the target LLM:
+### 2. Launch the Production FastAPI Framework Backend Server
+Set your configuration option inside `app/config.py` and boot the server application endpoint:
 ```bash
-ollama run llama3.1
+PYTHONPATH=. python main.py
 ```
-
-### 3. Run the Monolithic Source Code Execution Block
-Execute the script from your project root. The file will automatically ingest local target records (`data/raw/synthetic.csv`), initialize the database collection structures, map your hybrid models, and launch your graphical UI dashboard:
-```bash
-python main.py
-```
-*The local Gradio web portal will instantly launch at: **`http://127.0.0.1:7860`***
+*The service instantly listens for client requests at: **`http://127.0.0.1:8080`***
