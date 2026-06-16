@@ -15,18 +15,26 @@ class QdrantBackend(BaseVectorDB):
         self.sparse_model = SparseTextEmbedding(model_name="prithivida/Splade_PP_en_v1")
 
     def initialize_collection(self) -> None:
-        if not self.client.collection_exists(collection_name=self.collection_name):
-            self.client.create_collection(
-                collection_name=self.collection_name,
-                vectors_config={"dense-notes": models.VectorParams(size=384, distance=models.Distance.COSINE)},
-                sparse_vectors_config={"sparse-notes": models.SparseVectorParams()}
-            )
+        """Create collection only if missing, maintaining local data vector persistence."""
+        if self.client.collection_exists(collection_name=self.collection_name):
+            print(f"🎉 Persistent Index Ready: Loaded existing '{self.collection_name}' cache layout.")
+            return
+
+        print(f"📦 Initializing pristine data collection structure for '{self.collection_name}'...")
+        self.client.create_collection(
+            collection_name=self.collection_name,
+            vectors_config={"dense-notes": models.VectorParams(size=384, distance=models.Distance.COSINE)},
+            sparse_vectors_config={"sparse-notes": models.SparseVectorParams()}
+        )
+        print("✅ Database indexing structure prepared.")
 
     def ingest_documents(self, chunked_records: List[Dict[str, Any]]) -> None:
         points = []
         for record in chunked_records:
-            # FIX: Convert the generator directly to a list, then extract index 0 (the actual embedding array)
+            # 1. Extract dense embedding array safely from the list generator
             dense_embeds = list(self.dense_model.embed([record["child_text"]]))[0].tolist()
+
+            # 2. Extract sparse matrix object safely (Do NOT call [0] on the generator list step)
             sparse_embeds = list(self.sparse_model.embed([record["child_text"]]))[0]
 
             points.append(
@@ -41,7 +49,7 @@ class QdrantBackend(BaseVectorDB):
                     },
                     payload={
                         "parent_id": record["parent_id"],
-                        "clinical_note": record["parent_context"],  # Passes parent block back to LLM context
+                        "clinical_note": record["parent_context"],
                         **record["metadata"]
                     }
                 )
@@ -50,15 +58,19 @@ class QdrantBackend(BaseVectorDB):
             self.client.upsert(collection_name=self.collection_name, points=points)
 
     def hybrid_search(self, user_query: str, limit: int = 1) -> List[Dict[str, Any]]:
-        # FIX: Align the search query generation with the ingestion mapping layout
+        # 1. Extract query dense vector
         query_dense = list(self.dense_model.embed([user_query]))[0].tolist()
-        query_sparse_raw = list(self.sparse_model.embed([user_query]))[0]
+
+        # 2. FIX: Extract the raw sparse object representation safely without multi-dimensional index cropping
+        sparse_generator = list(self.sparse_model.embed([user_query]))
+        query_sparse_raw = sparse_generator[0]
 
         query_sparse = models.SparseVector(
             indices=query_sparse_raw.indices.tolist(),
             values=query_sparse_raw.values.tolist()
         )
 
+        # 3. Execute fused hybrid prefetch matching loops
         results = self.client.query_points(
             collection_name=self.collection_name,
             prefetch=[

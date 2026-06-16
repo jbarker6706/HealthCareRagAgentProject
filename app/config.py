@@ -8,7 +8,7 @@ class Settings(BaseSettings):
 
     # Selected Database ("qdrant" or "chroma")
     # This fulfills your polymorphic requirement
-    VECTOR_DB_BACKEND: str = "qdrant"
+    VECTOR_DB_BACKEND: str = "chroma"
 
     # Infrastructure Endpoints
     QDRANT_URL: str = "http://localhost:6333"
