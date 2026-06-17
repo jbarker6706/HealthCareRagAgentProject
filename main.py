@@ -2,7 +2,6 @@
 import os
 import uuid
 import pandas as pd
-import gradio as gr
 
 from qdrant_client import QdrantClient
 from qdrant_client import models  # Essential for Prefetch, Distance, etc.
@@ -14,8 +13,14 @@ from langchain_core.tools import tool
 from langchain_ollama import ChatOllama
 from langchain.agents import create_agent
 from langgraph.checkpoint.memory import MemorySaver
-# from langchain_core.chat_history import InMemoryChatMessageHistory
-# from langchain_core.runnables.history import RunnableWithMessageHistory
+from contextlib import asynccontextmanager
+
+
+# FastAPI Production Modules
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 
 # ==========================================================
@@ -164,43 +169,16 @@ agent_executor = create_agent(
 
 
 # ==========================================================
-# 5. GRADIO INTERACTIVE OPEN-SOURCE WEB UI
+# 5. FASTAPI SCHEMAS & UTILITIES
 # ==========================================================
-def gradio_chat_interface(message, history):
-    """
-    Handles user text queries using modern LangChain V1.0 structures.
-    Gradio automatically manages message state values inside history payloads.
-    """
-    # 1. Extract the raw string query text safely from the Gradio input
-    if isinstance(message, dict) and "text" in message:
-        user_query = message["text"]
-    elif hasattr(message, "text"):
-        user_query = message.text
-    else:
-        user_query = str(message)
-
-    # 2. Map a unique thread identifier for LangGraph state checkpoint persistence
-    config = {"configurable": {"thread_id": "gradio_local_session"}}
-
-    # 3. Format inputs using standard text mapping.
-    inputs = {"messages": user_query}
-
-    try:
-        # 4. Invoke your compiled agent graph execution engine
-        result = agent_executor.invoke(inputs, config=config)
-
-        # 5. Safely pull out the final assistant response string text payload
-        agent_response = result["messages"][-1].content
-        return agent_response
-
-    except Exception as e:
-        return f"⚠️ System Processing Error: {str(e)}"
+class ChatQuery(BaseModel):
+    message: str
+    thread_id: str = "default_local_session"
 
 
-# ==========================================================
-# 6. RUN ENGINE PIPELINES & VISUAL LAUNCH
-# ==========================================================
-if __name__ == "__main__":
+# FastAPI Lifespan management for clean initialization
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     print("\n--- Running Hybrid Search API Isolation check ---")
     test_query = "Patients diagnosed with CAD showing signs of respiratory distress"
     try:
@@ -208,15 +186,53 @@ if __name__ == "__main__":
         print(f"Extraction operational. Found {len(search_hits.points)} top matches.")
     except Exception as e:
         print(f"Database search isolation warning: {e}")
+    yield
+    print("Shutting down Open-Source Clinical API...")
 
-    print("\n🚀 Starting Open-Source Clinical Web Dashboard...")
 
-    # FIX: Removed 'theme="soft"' to prevent the Gradio TypeError completely
-    demo = gr.ChatInterface(
-        fn=gradio_chat_interface,
-        title="🏥 Open-Source Clinical Hybrid RAG Agent",
-        description="Powered locally by Ollama (Llama 3.1), Qdrant Hybrid Vector DB, and LangGraph State Memory."
-    )
+app = FastAPI(
+    title="🏥 Open-Source Clinical Hybrid RAG API",
+    description="Backend API powered by Ollama, Qdrant Hybrid Vector DB, and LangGraph.",
+    version="2.0.0",
+    lifespan=lifespan
+)
 
-    # Launch the application interface server locally at http://127.0.0.1:7860
-    demo.launch(server_name="127.0.0.1", server_port=7860, share=False)
+
+# ==========================================================
+# 6. API ENDPOINTS & WEB ROUTING
+# ==========================================================
+@app.post("/api/chat")
+async def chat_endpoint(payload: ChatQuery):
+    """
+    Handles user text queries using LangGraph State Checkpointing over HTTP.
+    """
+    # Map a thread identifier for LangGraph state checkpoint persistence
+    config = {"configurable": {"thread_id": payload.thread_id}}
+    inputs = {"messages": payload.message}
+
+    try:
+        # Invoke your compiled agent graph execution engine
+        result = agent_executor.invoke(inputs, config=config)
+
+        # Safely pull out the final assistant response string text payload
+        agent_response = result["messages"][-1].content
+        return {"response": agent_response, "thread_id": payload.thread_id}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"System Processing Error: {str(e)}")
+
+
+@app.get("/", response_class=HTMLResponse)
+async def get_web_dashboard():
+    """
+    Serves a clean HTML/JS Dashboard directly to your browser.
+    """
+    with open("index.html", "r", encoding="utf-8") as f:
+        return f.read()
+
+
+if __name__ == "__main__":
+    import uvicorn
+    print("\n🚀 Starting Open-Source Clinical Web Dashboard on Revision 2...")
+
+    uvicorn.run("main:app", host="127.0.0.1", port=8080, reload=False)
