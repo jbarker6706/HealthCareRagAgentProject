@@ -5,7 +5,7 @@ import pandas as pd
 
 from qdrant_client import QdrantClient
 from qdrant_client import models  # Essential for Prefetch, Distance, etc.
-from fastembed.embedding import DefaultEmbedding
+from fastembed import TextEmbedding as DefaultEmbedding
 from fastembed.sparse.sparse_text_embedding import SparseTextEmbedding
 
 # MODERN PRODUCTION LANGCHAIN V1.0 STRUCTURE
@@ -22,12 +22,42 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+# Inngest Production Modules
+import inngest
+from inngest import Inngest, TriggerEvent
+from inngest.fast_api import serve
+
+
 
 # ==========================================================
 # 1. GLOBAL INITIALIZATION & LOCAL MODELS
 # ==========================================================
 client = QdrantClient(url="http://localhost:6333")
 COLLECTION_NAME = "asclepius_clinical_notes"
+
+# Initialize the local observability client
+inngest_client = Inngest(app_id="clinical_rag_pipeline", is_production=False)
+#inngest_client = Inngest(app_id="clinical_rag_pipeline")
+
+
+# Replace your existing observer function block layout with this:
+@inngest_client.create_function(
+    fn_id="observe_clinical_query",
+    trigger=TriggerEvent(event="clinical/query.requested") # Fixes Pydantic validation layout
+)
+async def async_query_observer(ctx, step):
+    """Logs the incoming user questions and finalized output strings to the dashboard."""
+    message = ctx.event.data.get("message")
+    thread_id = ctx.event.data.get("thread_id")
+    response_text = ctx.event.data.get("response")
+
+    return {
+        "thread_id": thread_id,
+        "user_message": message,
+        "agent_response": response_text,
+        "status": "logged"
+    }
+
 
 print("Initializing local embedding models globally...")
 dense_model = DefaultEmbedding(model_name="BAAI/bge-small-en-v1.5")
@@ -197,6 +227,9 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+# Expose the tracking endpoint so the Inngest Docker dashboard can see your app
+serve(app, inngest_client, [async_query_observer])
+
 
 # ==========================================================
 # 6. API ENDPOINTS & WEB ROUTING
@@ -205,6 +238,7 @@ app = FastAPI(
 async def chat_endpoint(payload: ChatQuery):
     """
     Handles user text queries using LangGraph State Checkpointing over HTTP.
+    Now tracing telemetry using explicitly structured Inngest Events.
     """
     # Map a thread identifier for LangGraph state checkpoint persistence
     config = {"configurable": {"thread_id": payload.thread_id}}
@@ -216,11 +250,23 @@ async def chat_endpoint(payload: ChatQuery):
 
         # Safely pull out the final assistant response string text payload
         agent_response = result["messages"][-1].content
+
+        # Package variables inside an official Inngest Event object wrapper
+        await inngest_client.send(
+            inngest.Event(
+                name="clinical/query.requested",
+                data={
+                    "thread_id": payload.thread_id,
+                    "message": payload.message,
+                    "response": agent_response
+                }
+            )
+        )
+
         return {"response": agent_response, "thread_id": payload.thread_id}
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"System Processing Error: {str(e)}")
-
 
 @app.get("/", response_class=HTMLResponse)
 async def get_web_dashboard():
