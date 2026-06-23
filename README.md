@@ -63,7 +63,7 @@ docker run -d -p 6333:6333 -p 6334:6334 \
 # C. Start the Inngest Telemetry Server via Host Networking Interface
 # (Note: --net=host allows auto-discovery handshake with your FastAPI runtime)
 docker rm -f local-inngest
-docker run -d --net=host --name local-inngest node:18-alpine npx inngest-cli@latest dev -p 8288 -u http://127.0.0
+docker run -d --net=host --name local-inngest node:18-alpine npx inngest-cli@latest dev -p 8288 -u http://127.0.0.1:8080/api/inngest
 ```
 
 ### 2. Python Environment Installation
@@ -89,7 +89,7 @@ PYTHONPATH=. python main.py
 
 ### Step 2: Accessing the Interactive Dashboards
 Open **Firefox** and navigate to your active local execution panes:
-* **Interactive Query Console:** `http://127.0.0` (FastAPI Swagger Interface)
+* **Interactive Query Console:** `http://localhost:8080/docs#/default/chat_endpoint_api_chat_post` (FastAPI Swagger Interface)
 * **Live Telemetry Audit Logs:** `http://localhost:8288` (Inngest Operator Panel)
 
 ### Step 3: Dispatching Queries
