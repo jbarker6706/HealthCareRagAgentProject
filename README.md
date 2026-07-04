@@ -1,12 +1,12 @@
 # 🏥 On-Premise Clinical Hybrid RAG Agent & Telemetry Architecture (v2.1.0)
 
-An enterprise-grade, 100% local, air-gapped Artificial Intelligence platform engineered to process unstructured clinical notation logs and electronic health records (EHR). This platform guarantees absolute data sovereignty and strict HIPAA compliance boundaries by executing exclusively on-premise.
-
-It features a **Polymorphic Multi-Backend Vector Core** capable of routing queries dynamically across **Chroma DB** or **Qdrant**, managed by a **LangGraph Supervisor Agent**, and audited via a non-blocking **Inngest** distributed telemetry engine.
+An enterprise-grade, 100% local, air-gapped Artificial Intelligence platform engineered to process unstructured clinical notation logs and electronic health records (EHR) with strict data sovereignty. This system is designed around an interface-driven polymorphic data core, managed by a LangGraph State engine, and audited via an isolated background telemetry framework.
 
 ---
 
 ## 🚀 Core Architecture Overview
+
+This decoupled platform routes client interactions through a high-performance web API framework, leveraging state-machine routing loops and an interchangeable data retention layer.
 
 ```text
                [ Clinician User Client Request via HTTP / REST ]
@@ -14,39 +14,63 @@ It features a **Polymorphic Multi-Backend Vector Core** capable of routing queri
                                        ▼
                          ┌───────────────────────────┐
                          │   FastAPI Gateway Router  │
+                         │     (app/api/routes.py)   │
                          │        (Port 8080)        │
                          └─────────────┬─────────────┘
                                        │
+                                       ▼
+                         ┌───────────────────────────┐
+                         │    Supervisor Agent       │
+                         │  (app/core/agent_graph.py)│
+                         └─────────────┬─────────────┘
                                        ├──────────────────────────────┐
-                                       ▼ (Sync Pipeline)              ▼ (Async Event Broadcast)
+                                       ▼ (Sync Pipeline)              ▼ (OS-Level Detached Thread)
                          ┌───────────────────────────┐  ┌───────────────────────────┐
                          │    Supervisor Agent       │  │   Inngest Dev Telemetry   │
                          │    (LangGraph Engine)     │  │     (Port 8288 Host)      │
                          └─────────────┬─────────────┘  └───────────────────────────┘
                                        │
                 ┌──────────────────────┴──────────────────────┐
+                ▼                                             ▼
                 ▼ (Polymorphic Driver Selection)              ▼ 
    ┌────────────────────────┐                    ┌────────────────────────┐
-   │    Qdrant DB Engine    │                    │    Chroma DB Engine    │
-   │  (Dense + Sparse RRF)  │                    │     (Dense Semantic)   │
-   │      (Port 6333)       │                    │       (Port 8000)      │
-   └────────────────────────┘                    └────────────────────────┘
+   │   EMR Retrieval RAG    │                    │  Clinical Trial Agent  │
+   │  (Polymorphic Interface)│                    │   (Web Search Tool)    │
+   └────────────┬───────────┘                    └────────────────────────┘
+                │
+        ┌───────┴───────┐
+        ▼               ▼
+┌──────────────┐┌──────────────┐
+│  Qdrant DB   ││  Chroma DB   │
+│(Hybrid Search)│(Dense Vector)│
+└──────────────┘└──────────────┘
 ```
 
-### Key Architectural Pillars
-* **Polymorphic Search Topologies:** Supports running both isolated lightweight embedding instances (Chroma HTTP Client) and highly advanced multi-vector retrieval networks (Qdrant Engine combining `bge-small-en-v1.5` dense vectors with `Splade_PP_en_v1` sparse tokens fused via Reciprocal Rank Fusion).
-* **Non-Blocking Telemetry & Audit Trails:** Utilizes an asynchronous event bus layer built with `Inngest` to split real-time user request loops from tracking and security compliance logging, eliminating local inference latency overhead.
-* **Programmatic HIPAA Guardrails:** Enforces deterministic SOAP (Subjective, Objective, Assessment, Plan) formatting schemas while maintaining structural parameters for local `Llama 3.1` model execution.
+### 1. Polymorphic Multi-Backend Vector Core
+The system features an abstract database implementation layer (`app/database/base.py`) that permits switching the underlying hardware storage engine dynamically at boot time via configurations without modifying upstream code components:
+* **Qdrant Hybrid Engine (`qdrant_backend.py`):** Combines dense semantic vectors (`bge-small-en-v1.5`) with sparse lexical tokens (`Splade_PP_en_v1`) processed through Reciprocal Rank Fusion (RRF).
+* **Chroma Semantic Engine (`chroma_backend.py`):** Runs an ultra-lightweight, local, disk-backed persistent semantic document cluster utilizing optimized FastEmbed float extractions.
+
+### 2. Thread-Isolated Auditing & Telemetry
+To bypass event-loop starvation caused by heavy local LLM inference models, the system completely untethers tracing and security compliance logging from the primary process. Telemetry triggers are dispatched onto an independent OS-level background thread, sending immediate `200 OK` responses back to clinicians while logging trails concurrently.
+
+### 3. Context Engineering & Programmatic HIPAA Security
+* **Parent-Child Chunk Partitioning:** Mitigates LLM context window clutter. Documents are split into precise 200-character tokens (children) for vector matching, but link back to 1000-character paragraphs (parents) to supply the LLM with ample diagnostic data.
+* **HIPAA Compliance Redactor:** A rigid security interception layer that applies compiled regular expressions to strip out Protected Health Information (PHI) like SSNs, Medical Record Numbers (MRN), phone numbers, and emails before ingestion.
 
 ---
 
-## 📦 System Prerequisites & Infrastructure Setup
+## ⚡ Technical Talking Points for Recruiters
 
-Before booting the unified platform application, ensure your environment runs the three primary background infrastructure services inside Docker.
+* **Polymorphic Database Decoupling:** "I engineered an abstract, dual-backend data model. By running Chroma and Qdrant in separate containers, the application can serve lightweight persistent lookups or execute complex hybrid search queries blending dense semantics and sparse token structures using Reciprocal Rank Fusion."
+* **Hardware Thread-Separated Architecture:** "To maintain rapid HTTP response loops under heavy local inference, I offloaded Inngest telemetry logging to dedicated OS-level threads. This frees up the shared event loop from CPU-bound locks during Llama generation blocks, preventing networking delays across our Docker bridge."
+* **Persistent Local Vector Storage:** "By establishing Docker mounts mapping to local machine directories, vector indices persist across runtime container lifecycles, completely bypassing expensive cloud synchronization architectures."
 
-### 1. Initialize Vector Stores & Telemetry Engines
-Open your native Linux terminal and run the following configuration commands to spin up your background services:
+---
 
+## 🏁 Verification & Subsystem Execution
+
+### 1. Initialize Persistent Local Containers & Telemetry Server
 ```bash
 # A. Start the Dockerized Chroma Persistent Database
 docker run -d -p 8000:8000 \
@@ -61,57 +85,12 @@ docker run -d -p 6333:6333 -p 6334:6334 \
   qdrant/qdrant
 
 # C. Start the Inngest Telemetry Server via Host Networking Interface
-# (Note: --net=host allows auto-discovery handshake with your FastAPI runtime)
 docker rm -f local-inngest
 docker run -d --net=host --name local-inngest node:18-alpine npx inngest-cli@latest dev -p 8288 -u http://127.0.0.1:8080/api/inngest
 ```
 
-### 2. Python Environment Installation
-Ensure your local Python virtual environment (`.venv`) possesses all modern AI production packages:
-
+### 2. Launch the Application Server
 ```bash
 source .venv/bin/activate
-pip install fastapi uvicorn qdrant-client chromadb fastembed langchain-core langchain-ollama langgraph pydantic pandas inngest
+INNGEST_DEV=1 PYTHONPATH=. python main.py
 ```
-
----
-
-## 🏁 Execution & Query Sequence
-
-### Step 1: Launch the FastAPI Gateway
-From your root project directory (`HealthCareRagAgentProject`), compile and launch the main application script:
-
-```bash
-PYTHONPATH=. python main.py
-```
-* **Telemetry Sync:** Upon boot, the application will push its function schemas to the Inngest engine over host networking, completing the initialization loop with a clean `200 OK` handshake response.
-* **Auto-Ingestion Matrix:** If the target collection is empty, the pipeline will read `data/raw/synthetic.csv`, calculate embedding matrices locally, and index the data points automatically.
-
-### Step 2: Accessing the Interactive Dashboards
-Open **Firefox** and navigate to your active local execution panes:
-* **Interactive Query Console:** `http://localhost:8080/docs#/default/chat_endpoint_api_chat_post` (FastAPI Swagger Interface)
-* **Live Telemetry Audit Logs:** `http://localhost:8288` (Inngest Operator Panel)
-
-### Step 3: Dispatching Queries
-To query your system, use the FastAPI automated documentation panel under **`POST /api/chat`**, click **Try it out**, and submit your structured payload:
-
-```json
-{
-  "message": "Check for historical logs regarding chest distress or CAD",
-  "thread_id": "clinical_session_abc"
-}
-```
-
-### Step 4: Verification of Audit Trails
-After the agent finishes producing its clinical SOAP block response, click onto your **Inngest Dashboard (Port 8288)** and enter the **Runs** view. You will find a transparent structural entry tracking the trace for `observe_clinical_query`, exposing:
-* The exact user prompt metadata.
-* LangGraph state performance logs.
-* The finalized response text payload securely tracked under local enterprise variables.
-
----
-
-## 🛠️ Technical Talking Points for Recruiters
-
-* **Polymorphic Database Decoupling:** *"I engineered an abstract, dual-backend data model. By running Chroma and Qdrant in separate containers, the application can serve lightweight persistent lookups or execute complex hybrid search queries blending dense semantics and sparse token structures using Reciprocal Rank Fusion."*
-* **Telemetry-Separated Architecture:** *"To maintain rapid HTTP response loops, I integrated Inngest background event systems. This allows the FastAPI application loop to process LangGraph chains instantly for the clinician, while asynchronously broadcasting data logging traces into a sovereign audit pipeline."*
-* **Determinism in Healthcare AI:** *"By combining custom Pydantic trigger schemas with precise system prompts, the local Llama 3.1 runner is strictly constrained to standard clinical SOAP methodologies, mitigating hallucinations and ensuring factual data reporting."*

@@ -4,10 +4,9 @@ from typing import List, Dict, Any
 from app.database.base import BaseVectorDB
 from app.config import settings
 
-
 class ChromaBackend(BaseVectorDB):
     def __init__(self):
-        # Connects directly to your local-chroma Docker container on port 8000
+        # Explicit HTTP client mapping to the local-chroma Docker container
         self.client = chromadb.HttpClient(host="localhost", port=8000)
         self.dense_model = DefaultEmbedding(model_name="BAAI/bge-small-en-v1.5")
         self.collection_name = settings.COLLECTION_NAME
@@ -17,15 +16,10 @@ class ChromaBackend(BaseVectorDB):
         pass
 
     def ingest_documents(self, chunked_records: List[Dict[str, Any]]) -> None:
-        ids = []
-        embeddings = []
-        documents = []
-        metadatas = []
+        ids, embeddings, documents, metadatas = [], [], [], []
 
         for record in chunked_records:
-            # FIX: Pull the inner array out of the FastEmbed list generator before calling .tolist()
             dense_embeds = list(self.dense_model.embed([record["child_text"]]))[0].tolist()
-
             ids.append(record["chunk_id"])
             embeddings.append(dense_embeds)
             documents.append(record["parent_context"])
@@ -38,13 +32,8 @@ class ChromaBackend(BaseVectorDB):
             self.collection.add(ids=ids, embeddings=embeddings, documents=documents, metadatas=metadatas)
 
     def hybrid_search(self, user_query: str, limit: int = 1) -> List[Dict[str, Any]]:
-        # FIX: Align the query embedding extraction with the ingestion array mapping layout
         query_dense = list(self.dense_model.embed([user_query]))[0].tolist()
-
-        results = self.collection.query(
-            query_embeddings=[query_dense],
-            n_results=limit
-        )
+        results = self.collection.query(query_embeddings=[query_dense], n_results=limit)
 
         standardized_hits = []
         if results and results.get("documents") and results["documents"]:

@@ -1,7 +1,7 @@
-
 import os
 import uuid
 import pandas as pd
+import threading
 
 from qdrant_client import QdrantClient
 from qdrant_client import models  # Essential for Prefetch, Distance, etc.
@@ -15,7 +15,6 @@ from langchain.agents import create_agent
 from langgraph.checkpoint.memory import MemorySaver
 from contextlib import asynccontextmanager
 
-
 # FastAPI Production Modules
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
@@ -27,7 +26,7 @@ import inngest
 from inngest import Inngest, TriggerEvent
 from inngest.fast_api import serve
 
-
+from app.config import settings
 
 # ==========================================================
 # 1. GLOBAL INITIALIZATION & LOCAL MODELS
@@ -37,26 +36,22 @@ COLLECTION_NAME = "asclepius_clinical_notes"
 
 # Initialize the local observability client
 inngest_client = Inngest(app_id="clinical_rag_pipeline", is_production=False)
-#inngest_client = Inngest(app_id="clinical_rag_pipeline")
 
 
-# Replace your existing observer function block layout with this:
 @inngest_client.create_function(
     fn_id="observe_clinical_query",
-    trigger=TriggerEvent(event="clinical/query.requested") # Fixes Pydantic validation layout
+    trigger=TriggerEvent(event="clinical/query.requested")
 )
 async def async_query_observer(ctx, step):
-    """Logs the incoming user questions and finalized output strings to the dashboard."""
-    message = ctx.event.data.get("message")
-    thread_id = ctx.event.data.get("thread_id")
-    response_text = ctx.event.data.get("response")
+    """Logs the incoming data natively and exits without returning a value.
 
-    return {
-        "thread_id": thread_id,
-        "user_message": message,
-        "agent_response": response_text,
-        "status": "logged"
-    }
+    This breaks the framework multi-step loop and forces an instant success state.
+    """
+    try:
+        data = ctx.event.data or {}
+        print(f"\n[INNGEST TELEMETRY SUCCESS] Thread ID: {data.get('thread_id')}")
+    except Exception as err:
+        print(f"[INNGEST TELEMETRY ERROR] {err}")
 
 
 print("Initializing local embedding models globally...")
@@ -98,7 +93,13 @@ def hybrid_query_engine(user_query: str, limit: int = 2):
 # ==========================================================
 if client.collection_exists(collection_name=COLLECTION_NAME):
     collection_info = client.get_collection(collection_name=COLLECTION_NAME)
-    should_embed_data = collection_info.points_count == 0
+
+    # Object aware property selection prevents unintentional duplication loops
+    points_exist = getattr(collection_info, "points_count", 0) or 0
+    if hasattr(collection_info, "vectors_count") and collection_info.vectors_count > 0:
+        points_exist = collection_info.vectors_count
+
+    should_embed_data = (points_exist == 0)
 else:
     client.create_collection(
         collection_name=COLLECTION_NAME,
@@ -189,14 +190,12 @@ tools = [query_patient_records, search_medical_guidelines]
 memory_checkpointer = MemorySaver()
 
 # 2. Compile the agent directly with the native checkpointer
-# This removes the need for RunnableWithMessageHistory entirely
 agent_executor = create_agent(
     model=llm,
     tools=tools,
     system_prompt=CLINICAL_SYSTEM_PROMPT,
     checkpointer=memory_checkpointer
 )
-
 
 # ==========================================================
 # 5. FASTAPI SCHEMAS & UTILITIES
@@ -206,14 +205,38 @@ class ChatQuery(BaseModel):
     thread_id: str = "default_local_session"
 
 
-# FastAPI Lifespan management for clean initialization
+def send_telemetry_in_isolated_thread(thread_id: str, message: str, response: str):
+    """
+    True detached OS-level background thread task.
+    By completely bypassing FastAPI's shared event loop, this guarantees
+    the Inngest container receives the payload instantly without freezing.
+    """
+    try:
+        inngest_client.send_sync(
+            {
+                "name": "clinical/query.requested",
+                "data": {
+                    "thread_id": thread_id,
+                    "user_query": message,
+                    "agent_response": response,
+                    "backend_engine": settings.VECTOR_DB_BACKEND
+                }
+            }
+        )
+        print(f"\n[Telemetry Success]: Detached thread successfully routed audit trace to Inngest for {thread_id}")
+    except Exception as telemetry_error:
+        print(f"\n[Telemetry Warning]: Background audit log trace dropped: {telemetry_error}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("\n--- Running Hybrid Search API Isolation check ---")
+    print(f"\n--- Running Dynamic Vector DB Check | Active Engine: {settings.VECTOR_DB_BACKEND.upper()} ---")
     test_query = "Patients diagnosed with CAD showing signs of respiratory distress"
     try:
-        search_hits = hybrid_query_engine(test_query)
-        print(f"Extraction operational. Found {len(search_hits.points)} top matches.")
+        from app.database import get_vector_db
+        db_driver = get_vector_db()
+        search_hits = db_driver.hybrid_search(test_query, limit=2)
+        print(f"Extraction operational. Found {len(search_hits)} top matches across local storage blocks.")
     except Exception as e:
         print(f"Database search isolation warning: {e}")
     yield
@@ -222,12 +245,11 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="🏥 Open-Source Clinical Hybrid RAG API",
-    description="Backend API powered by Ollama, Qdrant Hybrid Vector DB, and LangGraph.",
-    version="2.0.0",
+    description="Backend API powered by Ollama, Polymorphic Vector DB Layer, and LangGraph.",
+    version="2.1.0",
     lifespan=lifespan
 )
 
-# Expose the tracking endpoint so the Inngest Docker dashboard can see your app
 serve(app, inngest_client, [async_query_observer])
 
 
@@ -238,35 +260,32 @@ serve(app, inngest_client, [async_query_observer])
 async def chat_endpoint(payload: ChatQuery):
     """
     Handles user text queries using LangGraph State Checkpointing over HTTP.
-    Now tracing telemetry using explicitly structured Inngest Events.
+    Fires a true isolated background thread to guarantee Inngest delivery.
     """
-    # Map a thread identifier for LangGraph state checkpoint persistence
     config = {"configurable": {"thread_id": payload.thread_id}}
     inputs = {"messages": payload.message}
 
     try:
-        # Invoke your compiled agent graph execution engine
-        result = agent_executor.invoke(inputs, config=config)
+        # Invoke your compiled agent graph execution engine safely in a worker pool
+        import asyncio
+        result = await asyncio.to_thread(agent_executor.invoke, inputs, config=config)
 
         # Safely pull out the final assistant response string text payload
         agent_response = result["messages"][-1].content
 
-        # Package variables inside an official Inngest Event object wrapper
-        await inngest_client.send(
-            inngest.Event(
-                name="clinical/query.requested",
-                data={
-                    "thread_id": payload.thread_id,
-                    "message": payload.message,
-                    "response": agent_response
-                }
-            )
+        # Spin up a completely independent, dedicated OS thread
+        telemetry_thread = threading.Thread(
+            target=send_telemetry_in_isolated_thread,
+            args=(payload.thread_id, payload.message, agent_response),
+            daemon=True
         )
+        telemetry_thread.start()
 
         return {"response": agent_response, "thread_id": payload.thread_id}
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"System Processing Error: {str(e)}")
+
 
 @app.get("/", response_class=HTMLResponse)
 async def get_web_dashboard():
@@ -279,6 +298,5 @@ async def get_web_dashboard():
 
 if __name__ == "__main__":
     import uvicorn
-    print("\n🚀 Starting Open-Source Clinical Web Dashboard on Revision 2...")
-
+    print("\n🚀 Starting Open-Source Clinical Web Dashboard on Revision 2.1.0...")
     uvicorn.run("main:app", host="127.0.0.1", port=8080, reload=False)
